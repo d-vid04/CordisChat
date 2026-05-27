@@ -17,7 +17,7 @@ use crate::identity::Identity;
 use crate::protocol::{
     ClientMessage, Epoch, MemberInfo, ServerId, ServerMessage, StoredMessage, UserId,
 };
-use crate::state::{ChannelView, ClientState};
+use crate::state::ClientState;
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
