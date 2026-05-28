@@ -5,5 +5,9 @@ target/
 # Tauri generated files (schemas, etc.)
 /src-tauri/gen/
 
+# Relay runtime state
+relay-db.json
+relay-db.json.tmp
+
 # macOS
 .DS_Store

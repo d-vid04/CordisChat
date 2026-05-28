@@ -1,4 +1,4 @@
-# pq-chat — Tauri client
+# Cordis pq-chat — Tauri client
 
 A desktop client for the post-quantum encrypted group-chat relay.
 Reuses the same cryptographic stack as the server (ML-KEM-768 for key
@@ -50,9 +50,29 @@ cargo run                 # listens on ws://127.0.0.1:8080
 cargo run 0.0.0.0:9000    # (set the same URL on the client's onboarding screen)
 ```
 
-Leave it running, then start the client. State is in memory, so
-restarting the relay forgets all users — the client detects this on
-next login and silently re-registers with the same keypairs.
+Leave it running, then start the client.
+
+### Persistence
+
+The relay persists its **user table** (so `user_id`s stay stable and
+clients don't have to re-register) to a JSON file, reloading it on
+startup. The file defaults to `relay-db.json` in the working directory;
+override the location with `PQ_CHAT_RELAY_DB`:
+
+```bash
+PQ_CHAT_RELAY_DB=/var/lib/pq-chat/relay-db.json cargo run 0.0.0.0:8080
+```
+
+**Channels are intentionally *not* persisted.** Group keys are
+session-only and live only in client memory, so a freshly-started relay
+holds no key. If it revived old servers, anyone rejoining would be stuck
+"waiting for key" with no member able to rekey. So a relay restart keeps
+your identity but starts with no servers — you create fresh ones (where
+the creator holds the key and distribution works normally).
+
+Delete the file to also reset the user table to empty; clients then
+detect their `user_id` is unknown on next login and silently re-register
+with the same keypairs.
 
 To smoke-test the relay on its own (no GUI), with the relay running:
 

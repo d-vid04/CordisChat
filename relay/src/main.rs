@@ -25,7 +25,10 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
@@ -45,15 +48,68 @@ struct Channel {
     messages: Vec<StoredMessage>,
 }
 
-#[derive(Default)]
 struct Hub {
     users:    HashMap<UserId, UserRecord>,
     channels: HashMap<ServerId, Channel>,
     /// Currently-connected authenticated users → their outbound queue.
+    /// Ephemeral — rebuilt as clients connect, never persisted.
     online:   HashMap<UserId, Tx>,
+    /// Where the persistent snapshot is written.
+    path:     PathBuf,
 }
 
 type Shared = Arc<Mutex<Hub>>;
+
+/// The persistable slice of the hub: registered users only.
+///
+/// We deliberately do NOT persist channels. Group keys are session-only and
+/// live only in client memory, so a restarted relay holds no key — reviving
+/// old servers would just leave everyone stuck "waiting for key" with no
+/// member able to rekey. Persisting users keeps `user_id`s stable (no
+/// re-registration churn) without resurrecting unusable channels.
+///
+/// We serialise a borrowing view and deserialise an owning one so the live
+/// `Hub` can keep its non-serialisable `online`/`path` fields.
+#[derive(Serialize)]
+struct DbRef<'a> {
+    users: &'a HashMap<UserId, UserRecord>,
+}
+
+#[derive(Deserialize, Default)]
+struct DbOwned {
+    #[serde(default)]
+    users: HashMap<UserId, UserRecord>,
+}
+
+/// Load the snapshot from disk, or start empty if it's missing/corrupt.
+fn load_db(path: &Path) -> DbOwned {
+    match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            eprintln!("could not parse {} ({e}); starting empty", path.display());
+            DbOwned::default()
+        }),
+        Err(_) => DbOwned::default(),
+    }
+}
+
+/// Write the current users + channels to disk (atomic temp-then-rename).
+/// Called after each state-mutating message.
+async fn save(hub: &Shared) {
+    let (bytes, path) = {
+        let h = hub.lock().await;
+        let snap = DbRef { users: &h.users };
+        (serde_json::to_vec(&snap).ok(), h.path.clone())
+    };
+    let Some(bytes) = bytes else { return; };
+    let tmp = path.with_extension("json.tmp");
+    if let Err(e) = fs::write(&tmp, &bytes) {
+        eprintln!("persist write failed: {e}");
+        return;
+    }
+    if let Err(e) = fs::rename(&tmp, &path) {
+        eprintln!("persist rename failed: {e}");
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -61,7 +117,23 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:8080".to_string());
 
-    let hub: Shared = Arc::new(Mutex::new(Hub::default()));
+    // Persistent snapshot location (override with PQ_CHAT_RELAY_DB).
+    let db_path = std::env::var_os("PQ_CHAT_RELAY_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("relay-db.json"));
+    let loaded = load_db(&db_path);
+    println!(
+        "loaded {} users from {} (channels are not persisted)",
+        loaded.users.len(),
+        db_path.display()
+    );
+
+    let hub: Shared = Arc::new(Mutex::new(Hub {
+        users:    loaded.users,
+        channels: HashMap::new(),
+        online:   HashMap::new(),
+        path:     db_path,
+    }));
     let listener = TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
@@ -132,6 +204,10 @@ async fn handle_msg(
     pending: &mut Option<UserId>,
     cm: ClientMessage,
 ) {
+    // Only registration changes persisted state (the user table). Channels
+    // aren't persisted, so server/message ops don't trigger a save.
+    let mutates = matches!(cm, ClientMessage::Register { .. });
+
     match cm {
         // --- Registration & auth ------------------------------------------
         ClientMessage::Register { display_name, kem_public_key, sig_public_key } => {
@@ -351,6 +427,10 @@ async fn handle_msg(
         }
 
         ClientMessage::Ping => send(tx, &ServerMessage::Pong),
+    }
+
+    if mutates {
+        save(hub).await;
     }
 }
 

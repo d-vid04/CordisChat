@@ -89,14 +89,18 @@ async function loginAndEnter(url) {
   state.ws_url = url;
   await invoke('cmd_connect', { url });
   state.connected = true;
-  await invoke('cmd_login');
+  // cmd_login returns the current identity — which may carry a *new* user_id
+  // if the relay had forgotten us and we re-registered. Refresh from it so the
+  // member list can still match "us" (green + "(you)").
+  const id = await invoke('cmd_login');
+  state.identity = id;
   state.authenticated = true;
 
   $('chooser').classList.add('hidden');
   $('onboarding').classList.add('hidden');
   showApp();
   setRelayLabel(url);
-  setCryptoMe(state.identity.user_id);
+  setCryptoMe(id.user_id);
   await refreshServers();
 }
 
