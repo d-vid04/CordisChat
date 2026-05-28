@@ -316,7 +316,7 @@ fn short_id(u: UserId) -> String {
 
 async fn try_rekey_after_membership_change(
     state: &SharedState,
-    _app: &AppHandle,
+    app: &AppHandle,
     server_id: ServerId,
     joiner: Option<UserId>,
 ) -> Result<()> {
@@ -357,6 +357,14 @@ async fn try_rekey_after_membership_change(
         let ch = s.channels.entry(server_id).or_default();
         ch.keys.insert(new_epoch, new_key);
     }
+
+    // We hold the new key now, but the KeyMaterial path that unlocks every
+    // other member never runs for us (we don't wrap a key to ourselves). Emit
+    // the same event so our own composer unlocks instead of getting stuck on
+    // "waiting for group key".
+    let _ = app.emit("key_rotated", serde_json::json!({
+        "server_id": server_id, "epoch": new_epoch,
+    }));
 
     // Wrap and distribute to every member at the new epoch (including the
     // joiner; including ourselves is unnecessary but harmless — actually

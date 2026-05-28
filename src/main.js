@@ -36,26 +36,74 @@ async function boot() {
   // Wire global listeners first so we don't miss any backend events.
   await wireEvents();
 
-  // Have we got a persisted identity?
+  // Have we got a persisted identity? If so, present a chooser rather than
+  // silently auto-connecting — the user decides each launch whether to
+  // continue as that identity or switch to a different one.
   const id = await invoke('cmd_load_identity').catch(showError);
   if (id) {
     state.identity = id;
-    // Try to connect + login with stored credentials.
-    showApp();
-    setRelayLabel(state.ws_url);
-    setCryptoMe(id.user_id);
-    try {
-      await invoke('cmd_connect', { url: state.ws_url });
-      state.connected = true;
-      await invoke('cmd_login');
-      state.authenticated = true;
-      await refreshServers();
-    } catch (e) {
-      toast(`could not log in: ${e}`, true);
-    }
+    showChooser(id);
   } else {
     showOnboarding();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Identity chooser (shown when a saved identity exists)
+// ---------------------------------------------------------------------------
+
+function showChooser(id) {
+  $('chooser').classList.remove('hidden');
+  $('onboarding').classList.add('hidden');
+  $('app').classList.add('hidden');
+
+  $('ch-name').textContent = id.display_name;
+  $('chooser-id').textContent = `signed in as ${id.display_name} · ${id.user_id.slice(0, 8)}`;
+
+  $('ch-continue').addEventListener('click', onContinue);
+  $('ch-switch').addEventListener('click', () => {
+    // Non-destructive: the saved identity stays until onboarding registers a
+    // new one (which overwrites it on submit).
+    showOnboarding();
+  });
+}
+
+async function onContinue() {
+  const url = $('ch-url').value.trim();
+  if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+    setChStatus('relay must start with ws:// or wss://', 'err'); return;
+  }
+  const btn = $('ch-continue');
+  btn.disabled = true;
+  setChStatus('connecting…');
+  try {
+    await loginAndEnter(url);
+  } catch (e) {
+    setChStatus(`could not log in: ${e}`, 'err');
+    btn.disabled = false;
+  }
+}
+
+/// Connect + authenticate with the loaded identity, then enter the app.
+async function loginAndEnter(url) {
+  state.ws_url = url;
+  await invoke('cmd_connect', { url });
+  state.connected = true;
+  await invoke('cmd_login');
+  state.authenticated = true;
+
+  $('chooser').classList.add('hidden');
+  $('onboarding').classList.add('hidden');
+  showApp();
+  setRelayLabel(url);
+  setCryptoMe(state.identity.user_id);
+  await refreshServers();
+}
+
+function setChStatus(text, cls = '') {
+  const el = $('ch-status');
+  el.textContent = text;
+  el.className = `ob-status ${cls}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +112,7 @@ async function boot() {
 
 function showOnboarding() {
   $('onboarding').classList.remove('hidden');
+  $('chooser').classList.add('hidden');
   $('app').classList.add('hidden');
   $('ob-submit').addEventListener('click', onOnboardingSubmit);
   $('ob-name').focus();

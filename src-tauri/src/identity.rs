@@ -36,9 +36,16 @@ impl Identity {
 }
 
 fn identity_path() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("dev", "pqchat", "pq-chat")
-        .ok_or_else(|| anyhow::anyhow!("could not resolve app data dir"))?;
-    let dir = dirs.data_dir().to_path_buf();
+    // `PQ_CHAT_DATA_DIR` overrides the storage location. This lets you run
+    // several clients side by side under distinct identities (useful for
+    // testing multi-member channels / rekey): give each instance its own dir.
+    let dir = if let Some(custom) = std::env::var_os("PQ_CHAT_DATA_DIR") {
+        PathBuf::from(custom)
+    } else {
+        let dirs = ProjectDirs::from("dev", "pqchat", "pq-chat")
+            .ok_or_else(|| anyhow::anyhow!("could not resolve app data dir"))?;
+        dirs.data_dir().to_path_buf()
+    };
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     Ok(dir.join("identity.json"))
 }

@@ -85,5 +85,19 @@ async fn main() {
     let r = recv(&mut rx).await;
     check!(r["type"].as_str().unwrap(), "pong");
 
+    // register-then-create with NO explicit auth_finish — mirrors the client's
+    // first-run onboarding (connect -> register -> create). Register must
+    // implicitly authenticate the connection.
+    {
+        let (ws2, _) = connect_async(&url).await.expect("connect2");
+        let (mut tx2, mut rx2) = ws2.split();
+        tx2.send(Ws::Text(json!({"type":"register","display_name":"bob","kem_public_key":"AAAA","sig_public_key":"AAAA"}).to_string())).await.unwrap();
+        let r = recv(&mut rx2).await;
+        check!(r["type"].as_str().unwrap(), "registered");
+        tx2.send(Ws::Text(json!({"type":"create_server","name":"onboard-test"}).to_string())).await.unwrap();
+        let r = recv(&mut rx2).await;
+        check!(r["type"].as_str().unwrap(), "server_created"); // not "error: not authenticated"
+    }
+
     println!("\nALL {pass} CHECKS PASSED");
 }

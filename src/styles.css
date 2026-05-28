@@ -518,6 +518,7 @@ button { background: none; border: 0; cursor: pointer; }
   font-weight: 500;
 }
 .btn-ghost:hover { color: var(--text-primary); }
+.chooser-switch { width: 100%; height: 40px; margin-top: 10px; }
 
 .ob-status {
   margin-top: 12px;

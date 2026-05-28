@@ -34,6 +34,57 @@ cargo tauri build
 before launching the client (or change the relay URL on the onboarding
 screen).
 
+## Running the relay
+
+A minimal in-memory relay lives in [`relay/`](relay/). It's a "dumb
+fan-out" — it stores public keys + ciphertext, tracks channel
+membership and epochs, and forwards frames, but never sees a private
+key, group key, or plaintext.
+
+```bash
+# In a separate terminal, from the repo root:
+cd relay
+cargo run                 # listens on ws://127.0.0.1:8080
+
+# Or bind a different address:
+cargo run 0.0.0.0:9000    # (set the same URL on the client's onboarding screen)
+```
+
+Leave it running, then start the client. State is in memory, so
+restarting the relay forgets all users — the client detects this on
+next login and silently re-registers with the same keypairs.
+
+To smoke-test the relay on its own (no GUI), with the relay running:
+
+```bash
+cargo run --example smoke   # drives register → auth → create → … over a real WS
+```
+
+> **Note:** this relay is for local development and integration
+> testing. It accepts the auth challenge response without verifying the
+> Dilithium signature; a production relay would verify it against the
+> registered signing key.
+
+## Running two clients (multi-member testing)
+
+Each client persists its identity to one app-data location, so two
+instances would both load the *same* identity. To run several clients
+under distinct identities — e.g. to watch a key get re-distributed on a
+membership change — point each at its own data dir with
+`PQ_CHAT_DATA_DIR`:
+
+```bash
+# Terminal 1 — default identity ("David")
+cargo tauri dev
+
+# Terminal 2 — a fresh, separate identity ("Alice")
+PQ_CHAT_DATA_DIR=/tmp/pqchat-alice cargo tauri dev
+```
+
+The second instance has no identity in its dir, so it shows onboarding
+and registers as a new user on the relay. Both connect to the same
+relay and can join the same server.
+
 ## What it does
 
 - First launch shows an onboarding card asking for a display name and

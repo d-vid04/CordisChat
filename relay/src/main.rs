@@ -143,8 +143,16 @@ async fn handle_msg(
                 sig_public_key: B64.decode(&sig_public_key).unwrap_or_default(),
                 created_at: Utc::now(),
             };
-            hub.lock().await.users.insert(user_id, rec);
-            println!("registered {display_name} as {user_id}");
+            {
+                let mut h = hub.lock().await;
+                h.users.insert(user_id, rec);
+                // A fresh registration authenticates the current connection:
+                // the client treats register as login (see onboarding flow) and
+                // never sends AuthBegin/AuthFinish on first run.
+                h.online.insert(user_id, tx.clone());
+            }
+            *me = Some(user_id);
+            println!("registered {display_name} as {user_id} (authenticated)");
             send(tx, &ServerMessage::Registered { user_id });
         }
 
