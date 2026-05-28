@@ -1,4 +1,4 @@
-# Cordis pq-chat — Tauri client
+# CordisChat pq-chat — Tauri client
 
 A desktop client for the post-quantum encrypted group-chat relay.
 Reuses the same cryptographic stack as the server (ML-KEM-768 for key
